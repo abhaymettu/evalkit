@@ -1,4 +1,10 @@
-"""Assertion checks. Each returns (passed: bool, detail: str)."""
+"""Assertion checks. ``check`` dispatches on ``assertion["type"]``.
+
+Every check returns ``(passed, detail)``. ``detail`` is an empty string on
+pass for most types, and a short human-readable reason on failure. The
+``max_tokens`` check always fills ``detail`` so the count and its source are
+recorded even when it passes. See docs/assertions.md for the exact messages.
+"""
 import json
 import re
 
@@ -10,6 +16,30 @@ TYPES = ("exact", "contains", "not_contains", "regex", "json_schema", "max_token
 
 
 def check(assertion, text, completion_tokens=None, model=None):
+    """Evaluate one assertion against a model reply.
+
+    Args:
+        assertion: Dict with a ``type`` key and the fields that type needs.
+            ``exact``, ``contains``, ``not_contains``, ``regex``, ``json_schema``
+            and ``max_tokens`` read ``value``. ``judge`` reads ``rubric`` and
+            an optional ``model`` override.
+        text: The model reply to check.
+        completion_tokens: Token count reported by the API, or None. Only
+            ``max_tokens`` uses it. When None, ``max_tokens`` falls back to a
+            whitespace word count and says so in ``detail``.
+        model: A client with a ``chat`` method. Only ``judge`` uses it.
+
+    Returns:
+        ``(passed, detail)``. ``passed`` is a bool. ``detail`` is a string.
+
+    Raises:
+        ValueError: ``type`` is not one of ``TYPES``.
+        KeyError: A required field for the type is missing.
+        ModelError: ``judge`` was called with ``model=None``, or the judge
+            call itself failed.
+        re.error: ``regex`` has an invalid pattern.
+        jsonschema.SchemaError: ``json_schema`` has an invalid schema.
+    """
     kind = assertion.get("type")
     if kind == "exact":
         want = assertion["value"]

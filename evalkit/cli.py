@@ -1,6 +1,12 @@
-"""evalkit CLI: run, report, diff."""
+"""evalkit CLI: ``run``, ``report``, ``diff``.
+
+``run`` executes a JSONL suite and writes one JSON result per line.
+``report`` summarizes a results file. ``diff`` compares two results files
+case by case and lists what flipped.
+"""
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
@@ -10,11 +16,45 @@ from .model import MockModel, ModelError, OpenAICompatible
 
 
 def read_jsonl(path):
+    """Read a JSONL file into a list of parsed objects.
+
+    Args:
+        path: File path. Blank lines are skipped.
+
+    Returns:
+        List of decoded JSON values, one per non-blank line.
+
+    Raises:
+        OSError: The file cannot be opened.
+        json.JSONDecodeError: A non-blank line is not valid JSON.
+    """
     with open(path) as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
 def run_case(case, model):
+    """Send one case's prompt to the model and evaluate its assertions.
+
+    Args:
+        case: Suite object with ``name``, ``prompt``, optional ``system``,
+            and optional ``assertions`` (a list of assertion dicts).
+        model: A client with a ``chat`` method and a ``model`` attribute.
+
+    Returns:
+        A result dict with ``name``, ``prompt``, ``model``, ``ran_at``,
+        ``assertions``, and ``pass``. On a successful model call it also has
+        ``response``, ``latency_ms`` (rounded to 2 decimals), and
+        ``completion_tokens``. Each assertion entry has ``type`` and ``pass``
+        plus either ``detail`` or ``error``. A case with no assertions
+        passes.
+
+        If the model call raises ``ModelError``, the result has ``error`` set
+        to the message, ``response`` and ``latency_ms`` set to None, an empty
+        ``assertions`` list, and ``pass`` False.
+
+    Raises:
+        KeyError: ``case`` lacks ``name`` or ``prompt``.
+    """
     messages = []
     if case.get("system"):
         messages.append({"role": "system", "content": case["system"]})
@@ -41,9 +81,22 @@ def run_case(case, model):
 
 
 def cmd_run(args):
+    """Handle ``evalkit run``: run every case in order and stream results to ``--out``.
+
+    Creates the parent directory of ``--out`` if it does not exist. Prints
+    one ``PASS`` or ``FAIL`` line per case as it finishes, then a summary line.
+
+    Args:
+        args: Parsed namespace with ``suite``, ``out``, ``mock``, ``model``,
+            and ``base_url``.
+
+    Returns:
+        0 if every case passed, else 1.
+    """
     model = MockModel() if args.mock else OpenAICompatible(args.model, args.base_url)
     cases = read_jsonl(args.suite)
     results = []
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, "w") as out:
         for case in cases:
             r = run_case(case, model)
@@ -56,6 +109,20 @@ def cmd_run(args):
 
 
 def summarize(results):
+    """Aggregate a list of result dicts.
+
+    Args:
+        results: Result dicts as written by ``run``.
+
+    Returns:
+        Dict with ``cases`` (count), ``cases_passed``, ``errors`` (cases whose
+        model call failed), ``per_type`` (assertion type to
+        ``{"pass", "fail", "error"}`` counts, where ``error`` means the
+        assertion entry has an ``error`` key), and ``latency_ms``. The latency
+        block is None when no case has a measured latency; otherwise it holds
+        ``n``, ``min``, ``median``, ``p95``, and ``max``. ``p95`` is the value
+        at sorted index ``round(0.95 * (n - 1))``, not an interpolation.
+    """
     per_type = {}
     for r in results:
         for a in r["assertions"]:
@@ -73,6 +140,14 @@ def summarize(results):
 
 
 def cmd_report(args):
+    """Handle ``evalkit report``: print the summary of one results file.
+
+    Args:
+        args: Parsed namespace with ``results``.
+
+    Returns:
+        0 always. The report is informational.
+    """
     s = summarize(read_jsonl(args.results))
     print(f"cases: {s['cases_passed']}/{s['cases']} passed, {s['errors']} model errors\n")
     print(f"{'assertion':<14}{'pass':>6}{'fail':>6}{'error':>7}")
@@ -87,6 +162,22 @@ def cmd_report(args):
 
 
 def diff_results(old, new):
+    """Compare two result lists by case name.
+
+    Args:
+        old: Result dicts from the earlier run.
+        new: Result dicts from the later run.
+
+    Returns:
+        Dict with four sorted lists. ``fixed`` and ``broken`` hold
+        ``{"name", "assertions"}`` entries for cases whose case-level ``pass``
+        flipped from False to True or True to False. ``assertions`` lists the
+        positional indexes whose ``pass`` differs between the two runs, pairing
+        entries with ``zip``, so extra assertions in the longer list are not
+        compared. ``added`` and ``removed`` hold names present in only one
+        run. Cases whose case-level result did not change are not reported,
+        even if individual assertions flipped.
+    """
     a = {r["name"]: r for r in old}
     b = {r["name"]: r for r in new}
     out = {"fixed": [], "broken": [], "added": [], "removed": []}
@@ -107,6 +198,15 @@ def diff_results(old, new):
 
 
 def cmd_diff(args):
+    """Handle ``evalkit diff``: print what flipped between two results files.
+
+    Args:
+        args: Parsed namespace with ``old`` and ``new``.
+
+    Returns:
+        1 if any case broke, else 0. Fixed, added, and removed cases do not
+        affect the exit code.
+    """
     d = diff_results(read_jsonl(args.old), read_jsonl(args.new))
     for k in ("fixed", "broken"):
         for item in d[k]:
@@ -121,6 +221,15 @@ def cmd_diff(args):
 
 
 def main(argv=None):
+    """Parse arguments and dispatch to a subcommand.
+
+    Args:
+        argv: Argument list without the program name. Defaults to
+            ``sys.argv[1:]``.
+
+    Returns:
+        The subcommand's exit code. Exits with status 2 on a usage error.
+    """
     p = argparse.ArgumentParser(prog="evalkit", description="Minimal LLM output assertion runner.")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="run a suite and write results JSONL")

@@ -94,3 +94,23 @@ def test_full_mock_run_report_and_diff(tmp_path, capsys):
     assert main(["diff", str(out1), str(out2)]) == 0
     assert "fixed   expected-failure" in capsys.readouterr().out
     assert main(["diff", str(out2), str(out1)]) == 1
+
+
+def test_run_creates_missing_output_directory(tmp_path):
+    out = tmp_path / "nested" / "dir" / "run.jsonl"
+    main(["run", "examples/suite.jsonl", "--mock", "--out", str(out)])
+    assert len(read_jsonl(out)) == 5
+
+
+def test_http_200_without_choices_is_a_model_error(monkeypatch):
+    import io
+    import urllib.request
+    from evalkit.model import OpenAICompatible
+
+    body = json.dumps({"error": {"message": "model not found"}}).encode()
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: io.BytesIO(body))
+    with pytest.raises(ModelError, match="unexpected response body"):
+        OpenAICompatible("m", api_key="x").chat([{"role": "user", "content": "hi"}])
+    r = run_case({"name": "c", "prompt": "hi", "assertions": [{"type": "contains", "value": "x"}]},
+                 OpenAICompatible("m", api_key="x"))
+    assert r["pass"] is False and "unexpected response body" in r["error"] and r["assertions"] == []
