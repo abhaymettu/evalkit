@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evalkit"
+version = "0.1.0"
+description = "Minimal LLM output assertion runner"
+requires-python = ">=3.11"
+dependencies = ["jsonschema==4.23.0"]
+
+[project.scripts]
+evalkit = "evalkit.cli:main"
+
+[tool.setuptools]
+packages = ["evalkit"]

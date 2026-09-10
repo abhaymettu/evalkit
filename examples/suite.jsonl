@@ -1,0 +1,5 @@
+{"name": "greeting-exact", "prompt": "MOCK: Hello, world!", "assertions": [{"type": "exact", "value": "Hello, world!"}, {"type": "max_tokens", "value": 5}]}
+{"name": "contains-and-not", "prompt": "MOCK: The capital of France is Paris.", "assertions": [{"type": "contains", "value": "Paris"}, {"type": "not_contains", "value": "London"}, {"type": "regex", "value": "^The capital of \\w+ is \\w+\\.$"}]}
+{"name": "json-shape", "prompt": "MOCK: {\"city\": \"Paris\", \"population\": 2100000}", "assertions": [{"type": "json_schema", "value": {"type": "object", "required": ["city", "population"], "properties": {"city": {"type": "string"}, "population": {"type": "integer"}}}}]}
+{"name": "judged", "prompt": "MOCK: This answer should pass the rubric.", "assertions": [{"type": "judge", "rubric": "The response is a complete English sentence."}]}
+{"name": "expected-failure", "prompt": "MOCK: forty-two", "assertions": [{"type": "exact", "value": "42"}]}
